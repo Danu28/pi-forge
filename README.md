@@ -2,19 +2,7 @@
 
 **5 high-signal tools via `/forge` — disciplined, not nagging. Faster + Cheaper + Reliable + Durable.**
 
-> Fork of `pi-essentials` (5 tools, 1 extension) → `pi-forge` (same 5 tools, **slash-controlled**).  
-> No auto-blocking hooks. You run `/forge <task>` when you want discipline.
-
-## Why pi-forge over pi-essentials?
-
-| pi-essentials (auto) | pi-forge (slash) |
-|---|---|
-| Blocks `write/edit/bash` until `intent→plan` every session | No hard blocks — opt-in via `/forge` |
-| Injects prompt every turn (`before_agent_start`) | Guidance only when you invoke `/forge` |
-| 2-fail `debug intent` gate interrupts flow | Lint warnings, not gates — fix and re-check |
-| `/essentials` status only | `/forge` + `/forge status` + `/forge clear` + `/essentials` alias |
-
-Same 5 tools, same contracts — just controlled by you.
+Slash-controlled discipline for pi — you run `/forge <task>` when you want structure. No auto-blocking hooks.
 
 ## Install
 
@@ -34,7 +22,7 @@ Verify:
 ```bash
 pi packages:list   # → pi-forge
 pi tools:list      # → intent, plan, memo, intel, check
-pi --help          # → /forge, /forge-status, /essentials
+pi --help          # → /forge, /forge-status
 ```
 
 ## Quick start
@@ -73,8 +61,6 @@ Docs: [`docs/prompt-templates.md`](./docs/prompt-templates.md) · [`docs/checks.
 - `/forge <task>` — start disciplined run
 - `/forge status` — show intent/plan/memos/focus/budget
 - `/forge clear` — reset durable state
-- `/forge strict` / `/forge relaxed` — toggle legacy strict mode (default relaxed)
-- `/essentials` — back-compat alias (from pi-essentials)
 - `/forge-status` — alias for status
 
 ## Flow (opt-in)
@@ -84,16 +70,11 @@ happy:   /forge → intent → plan → intel → edits → check PASS → plan 
 freeform: no /forge → tools available, no gates — you choose
 ```
 
-## Migration from pi-essentials
-
-`pi-forge` hydrates legacy keys (`pi-ess:memo`, `pi-ess:plan`, etc.) automatically. No data loss.  
-Remove `pi-essentials` from `~/.pi/agent/settings.json` packages after installing `pi-forge`.
-
 ## Bundle size
 
 ```bash
 npm run size
-# dist: ~145KB (index + state + tools + helpers + maps)
+# dist: ~132K (index + state + tools + helpers + maps)
 ```
 
 ## Design principles

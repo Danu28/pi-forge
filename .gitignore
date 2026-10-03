@@ -7,5 +7,3 @@ coverage/
 .tmp/
 .pi/
 .vitest/
-nul
-NUL

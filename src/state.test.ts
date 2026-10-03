@@ -131,11 +131,11 @@ describe("hydrate", () => {
   it("hydrates memo, deliberation, plan, focus, intel", () => {
     const now = Date.now();
     hydrate([
-      { key: "pi-ess:memo", value: { id: "m1", cue: "cue1", summary: "s1", ts: now } },
-      { key: "pi-ess:deliberation", value: { id: "d1", goal: "do thing", hypotheses: ["a", "b"], ts: now } },
-      { key: "pi-ess:plan", value: { id: "p1", goal: "ship", tasks: [{ title: "t1", done: false }], ts: now } },
-      { key: "pi-ess:focus", value: { goal: "focus goal", files: ["src/a.ts"], acceptance: "done" } },
-      { key: "pi-ess:intel", value: { cwd: "/tmp", lang: "node", scripts: {}, testCmd: "npm test", lintCmd: "npm lint", buildCmd: "npm build", scannedAt: now, text: "txt" } },
+      { key: "pi-forge:memo", value: { id: "m1", cue: "cue1", summary: "s1", ts: now } },
+      { key: "pi-forge:deliberation", value: { id: "d1", goal: "do thing", hypotheses: ["a", "b"], ts: now } },
+      { key: "pi-forge:plan", value: { id: "p1", goal: "ship", tasks: [{ title: "t1", done: false }], ts: now } },
+      { key: "pi-forge:focus", value: { goal: "focus goal", files: ["src/a.ts"], acceptance: "done" } },
+      { key: "pi-forge:intel", value: { cwd: "/tmp", lang: "node", scripts: {}, testCmd: "npm test", lintCmd: "npm lint", buildCmd: "npm build", scannedAt: now, text: "txt" } },
     ]);
     expect(memos.has("m1")).toBe(true);
     expect(deliberations.length).toBe(1);
@@ -151,7 +151,7 @@ describe("hydrate", () => {
   it("enforces memo cap during hydrate", () => {
     const entries: any[] = [];
     for (let i = 0; i < MAX_MEMOS + 2; i++) {
-      entries.push({ key: "pi-ess:memo", value: { id: `mm:${i}`, cue: `c${i}`, summary: `s${i}`, ts: 1000 + i } });
+      entries.push({ key: "pi-forge:memo", value: { id: `mm:${i}`, cue: `c${i}`, summary: `s${i}`, ts: 1000 + i } });
     }
     hydrate(entries);
     expect(memos.size).toBe(MAX_MEMOS);
@@ -172,13 +172,13 @@ describe("hydrate", () => {
 
 describe("clearState", () => {
   it("clears globals", () => {
-    (globalThis as any).__pi_ess_focus = "focus";
-    (globalThis as any).__pi_ess_intel = { cwd: "/" };
-    (globalThis as any).__pi_ess_plan = { id: "p" };
+    (globalThis as any).__pi_forge_focus = "focus";
+    (globalThis as any).__pi_forge_intel = { cwd: "/" };
+    (globalThis as any).__pi_forge_plan = { id: "p" };
     clearState();
-    expect((globalThis as any).__pi_ess_focus).toBeUndefined();
-    expect((globalThis as any).__pi_ess_intel).toBeUndefined();
-    expect((globalThis as any).__pi_ess_plan).toBeUndefined();
+    expect((globalThis as any).__pi_forge_focus).toBeUndefined();
+    expect((globalThis as any).__pi_forge_intel).toBeUndefined();
+    expect((globalThis as any).__pi_forge_plan).toBeUndefined();
   });
 });
 
@@ -204,11 +204,11 @@ describe("hydrate extra branches", () => {
     hydrate(["plain string" as any]);
     expect(memos.size).toBe(0);
     // nested key/value wrapping
-    hydrate([{ key: "outer", value: { key: "pi-ess:memo", value: { id: "nested1", cue: "c", summary: "s", ts: Date.now() } } } as any]);
+    hydrate([{ key: "outer", value: { key: "pi-forge:memo", value: { id: "nested1", cue: "c", summary: "s", ts: Date.now() } } } as any]);
     expect(memos.has("nested1")).toBe(true);
     clearState();
     // key via type/kind/name fallback
-    hydrate([{ type: "pi-ess:memo", data: { id: "viaType", cue: "c", summary: "s", ts: Date.now() } } as any]);
+    hydrate([{ type: "pi-forge:memo", data: { id: "viaType", cue: "c", summary: "s", ts: Date.now() } } as any]);
     expect(memos.has("viaType")).toBe(true);
   });
   it("hydrates legacy deliberation shape", () => {
@@ -217,15 +217,15 @@ describe("hydrate extra branches", () => {
   });
   it(" caps deliberations at 20", () => {
     const entries: any[] = [];
-    for (let i = 0; i < 22; i++) entries.push({ key: "pi-ess:deliberation", value: { id: `d${i}`, goal: `g${i}`, hypotheses: ["a", "b"], ts: 1000 + i } });
+    for (let i = 0; i < 22; i++) entries.push({ key: "pi-forge:deliberation", value: { id: `d${i}`, goal: `g${i}`, hypotheses: ["a", "b"], ts: 1000 + i } });
     hydrate(entries);
     expect(deliberations.length).toBe(20);
     expect(deliberations[0].id).toBe("d2"); // oldest 2 evicted
   });
   it("falls back to globalThis when focusLine null", async () => {
-    (globalThis as any).__pi_ess_focus = "[pi-essentials focus] fallback goal";
-    (globalThis as any).__pi_ess_intel = { cwd: "/tmp", lang: "node", scripts: {}, testCmd: "t", lintCmd: "l", buildCmd: "b", scannedAt: Date.now(), text: "txt" };
-    (globalThis as any).__pi_ess_plan = { id: "fallbackPlan", goal: "g", tasks: [], ts: Date.now() };
+    (globalThis as any).__pi_forge_focus = "[pi-forge focus] fallback goal";
+    (globalThis as any).__pi_forge_intel = { cwd: "/tmp", lang: "node", scripts: {}, testCmd: "t", lintCmd: "l", buildCmd: "b", scannedAt: Date.now(), text: "txt" };
+    (globalThis as any).__pi_forge_plan = { id: "fallbackPlan", goal: "g", tasks: [], ts: Date.now() };
     hydrate([]);
     // hydrate clears then falls back to globalThis values
     const { focusLine: fl, intelCache, latestPlan } = await import("./state.js");

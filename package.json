@@ -30,12 +30,12 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:ci": "npm run typecheck && npm run lint && npm run test:coverage",
     "lint": "eslint src",
     "size": "npm run build && du -sh dist && ls -lh dist",
+    "audit": "npm run typecheck && npm run lint && npm run test:coverage && npm run size",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {

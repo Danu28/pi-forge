@@ -50,6 +50,3 @@ declare module "@earendil-works/pi-coding-agent" {
     appendEntry?: (key: string, value: unknown) => Promise<void>;
   }
 }
-declare module "typebox" {
-  export const Type: any;
-}

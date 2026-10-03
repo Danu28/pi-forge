@@ -54,8 +54,6 @@ export function registerTools(pi: ExtensionAPI): void {
       if (deliberations.length > 20) deliberations.shift();
       const fl = `[pi-forge focus] ${p.goal}` + (p.files?.length ? ` files:[${p.files.join(",")}]` : "") + (p.acceptance ? ` acceptance:${p.acceptance}` : "");
       (globalThis as unknown as Record<string, unknown>).__pi_forge_focus = fl;
-      // legacy mirror for migration
-      (globalThis as unknown as Record<string, unknown>).__pi_ess_focus = fl;
       try { await pi.appendEntry?.("pi-forge:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() }); } catch {}
       try { await pi.appendEntry?.("pi-forge:deliberation", entry); } catch {}
       const lintWarns = lintIntent({ goal: p.goal, hypotheses: hyps as [string, string], files: p.files, acceptance: p.acceptance });
@@ -148,7 +146,6 @@ export function registerTools(pi: ExtensionAPI): void {
         if (p.goal) pl.goal = truncate(p.goal, 200);
         try { await pi.appendEntry?.("pi-forge:plan", pl); } catch {}
         (globalThis as unknown as Record<string, unknown>).__pi_forge_plan = pl;
-        (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
         const allDone = pl.tasks.every((t) => t.done);
         const lintWarnsUpd = lintPlan(pl.tasks);
         const truncWarnUpd = p.goal ? truncationWarnings(p.goal, pl.goal) : null;
@@ -194,7 +191,6 @@ export function registerTools(pi: ExtensionAPI): void {
       const pl: Plan = { id, goal: truncatedGoal, tasks, ts: Date.now() };
       plans.set(id, pl);
       (globalThis as unknown as Record<string, unknown>).__pi_forge_plan = pl;
-      (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
       try { await pi.appendEntry?.("pi-forge:plan", pl); } catch {}
       const lintWarns = lintPlan(tasks);
       const truncWarn = truncationWarnings(p.goal!, truncatedGoal);
@@ -287,7 +283,7 @@ export function registerTools(pi: ExtensionAPI): void {
     async execute(_id: string, p: { refresh?: boolean; projectPath?: string }, _sig: unknown, _upd: unknown, ctx: { cwd: string }) {
       const rawCwd = p.projectPath ?? ctx.cwd;
       const cwd = resolve(rawCwd);
-      const cached = ((globalThis as unknown as Record<string, unknown>).__pi_forge_intel ?? (globalThis as unknown as Record<string, unknown>).__pi_ess_intel) as IntelProfile | undefined;
+      const cached = (globalThis as unknown as Record<string, unknown>).__pi_forge_intel as IntelProfile | undefined;
       if (cached && resolve(cached.cwd) === cwd && !p.refresh) {
         try {
           const pkgStat = await stat(join(cwd, "package.json"));
@@ -354,7 +350,6 @@ export function registerTools(pi: ExtensionAPI): void {
       const text = `project: ${displayName} (${lang}) | os: ${os} shell:${shell}\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}\n` + `suggested check: ${suggested} — prefer read for file checks; check timeout:10 (file) / 30-60 (test)`;
       const entry: IntelProfile = { ...profile, text };
       (globalThis as unknown as Record<string, unknown>).__pi_forge_intel = entry;
-      (globalThis as unknown as Record<string, unknown>).__pi_ess_intel = entry;
       try { await pi.appendEntry?.("pi-forge:intel", entry); } catch {}
       return { content: [{ type: "text", text: text + "\n→ Next: reads/edits → check (test: " + profile.testCmd + ")" }], details: { profile: entry, source: "fresh" } };
     },

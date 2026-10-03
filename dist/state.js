@@ -100,37 +100,33 @@ export function hydrate(entries) {
     intelCache = null;
     for (const raw of entries) {
         const { key, value } = extractKeyValue(raw);
-        // pi-forge primary keys; pi-ess:* kept for migration from pi-essentials
-        if ((key === "pi-forge:memo" || key === "pi-ess:memo") && isRecord(value) && typeof value["cue"] === "string") {
+        if (key === "pi-forge:memo" && isRecord(value) && typeof value["cue"] === "string") {
             const ep = value;
             memos.set(ep.id, ep);
         }
-        else if ((key === "pi-forge:deliberation" || key === "pi-ess:deliberation") && isRecord(value) && typeof value["goal"] === "string") {
+        else if (key === "pi-forge:deliberation" && isRecord(value) && typeof value["goal"] === "string") {
             const d = value;
             deliberations.push(d);
             if (deliberations.length > 20)
                 deliberations.shift();
         }
-        else if ((key === "pi-forge:plan" || key === "pi-ess:plan") && isRecord(value) && typeof value["id"] === "string") {
+        else if (key === "pi-forge:plan" && isRecord(value) && typeof value["id"] === "string") {
             const p = value;
             plans.set(p.id, p);
             latestPlan = p;
         }
-        else if ((key === "pi-forge:focus" || key === "pi-ess:focus") && isRecord(value) && typeof value["goal"] === "string") {
+        else if (key === "pi-forge:focus" && isRecord(value) && typeof value["goal"] === "string") {
             const v = value;
             focusLine =
                 `[pi-forge focus] ${v.goal}` +
                     (v.files?.length ? ` files:[${v.files.join(",")}]` : "") +
                     (v.acceptance ? ` acceptance:${v.acceptance}` : "");
             globalThis.__pi_forge_focus = focusLine ?? undefined;
-            // mirror legacy for compat
-            globalThis.__pi_ess_focus = focusLine ?? undefined;
         }
-        else if ((key === "pi-forge:intel" || key === "pi-ess:intel") && isRecord(value) && typeof value["cwd"] === "string") {
+        else if (key === "pi-forge:intel" && isRecord(value) && typeof value["cwd"] === "string") {
             const v = value;
             intelCache = v;
             globalThis.__pi_forge_intel = v;
-            globalThis.__pi_ess_intel = v;
         }
         else if (isRecord(value)) {
             if (typeof value["cue"] === "string" && typeof value["summary"] === "string" && "ts" in value) {
@@ -149,19 +145,10 @@ export function hydrate(entries) {
     enforceMemoCap();
     if (!focusLine && globalThis.__pi_forge_focus)
         focusLine = globalThis.__pi_forge_focus;
-    else if (!focusLine && globalThis.__pi_ess_focus)
-        focusLine = globalThis.__pi_ess_focus;
     if (!intelCache && globalThis.__pi_forge_intel)
         intelCache = globalThis.__pi_forge_intel;
-    else if (!intelCache && globalThis.__pi_ess_intel)
-        intelCache = globalThis.__pi_ess_intel;
     if (!latestPlan && globalThis.__pi_forge_plan) {
         latestPlan = globalThis.__pi_forge_plan;
-        if (latestPlan)
-            plans.set(latestPlan.id, latestPlan);
-    }
-    else if (!latestPlan && globalThis.__pi_ess_plan) {
-        latestPlan = globalThis.__pi_ess_plan;
         if (latestPlan)
             plans.set(latestPlan.id, latestPlan);
     }
@@ -184,18 +171,6 @@ export function clearState() {
     catch { }
     try {
         delete globalThis.__pi_forge_plan;
-    }
-    catch { }
-    try {
-        delete globalThis.__pi_ess_focus;
-    }
-    catch { }
-    try {
-        delete globalThis.__pi_ess_intel;
-    }
-    catch { }
-    try {
-        delete globalThis.__pi_ess_plan;
     }
     catch { }
 }

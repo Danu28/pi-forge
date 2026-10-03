@@ -29,11 +29,9 @@ This skill is activated only when the user runs `/forge <task>` (or `/forge stat
 - `/forge <task>` — start disciplined run for that task (injects workflow instruction)
 - `/forge status` — show intent/plan/memo/focus/budget (also `/forge` alone)
 - `/forge clear` — reset durable state (memos, plans, focus)
-- `/forge strict` / `/forge relaxed` — toggle legacy strict gating (default relaxed)
-- `/essentials` — alias for `/forge status` (back-compat with pi-essentials)
 - `/forge-status` — alias for status
 
-## Tools (same 5 as pi-essentials, slash-gated)
+## Tools (slash-gated)
 
 | # | Tool | Params | Purpose |
 |---|------|--------|---------|
@@ -55,11 +53,10 @@ Lint warnings (`⚠️ input lint`, `✂️ truncated`) fire inline — fix inpu
 
 ## State
 
-- Durable keys: `pi-forge:memo`, `pi-forge:deliberation`, `pi-forge:plan`, `pi-forge:focus`, `pi-forge:intel` (legacy `pi-ess:*` migrated on hydrate)
+- Durable keys: `pi-forge:memo`, `pi-forge:deliberation`, `pi-forge:plan`, `pi-forge:focus`, `pi-forge:intel`
 - In-memory: `deliberations` (20 cap), `plans` (Map), `memos` (100 LRU), `focusLine`, `intelCache`
 
 ## When to use
 
 - User wants discipline without nag → `/forge`
 - Task needs verifiable plan + PASS gate → `/forge`
-- Legacy `pi-essentials` users → `/essentials` still works

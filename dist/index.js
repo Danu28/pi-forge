@@ -28,9 +28,8 @@ export default function (pi) {
             }
         }
         catch { }
-        const strict = globalThis.__pi_forge_strict ? "strict" : "relaxed (slash-only)";
         const lines = ["pi-forge — slash-controlled discipline (5 tools)"];
-        lines.push(`mode: ${strict}`);
+        lines.push("mode: relaxed (slash-only)");
         lines.push(`intent: ${hasIntent ? "done" : "need intent{goal, hypotheses:[A,B]} (via /forge)"}`);
         lines.push(`plan: ${hasPlan ? "done" : "need plan{goal,tasks[3-10]}"}`);
         lines.push(`budget: ${pct}`);
@@ -40,16 +39,12 @@ export default function (pi) {
         return lines.join("\n");
     };
     pi.registerCommand("forge", {
-        description: "pi-forge — slash-controlled discipline. Usage: /forge <task> | /forge status | /forge clear | /forge strict",
+        description: "pi-forge — slash-controlled discipline. Usage: /forge <task> | /forge status | /forge clear",
         handler: async (args, ctx) => {
             const raw = args.trim();
             const cmd = raw.toLowerCase();
             if (cmd === "clear") {
                 clearState();
-                try {
-                    delete globalThis.__pi_forge_strict;
-                }
-                catch { }
                 ctx.ui?.notify?.("pi-forge state cleared", "info");
                 return;
             }
@@ -57,17 +52,8 @@ export default function (pi) {
                 ctx.ui?.notify?.(renderStatus(ctx), "info");
                 return;
             }
-            if (cmd === "strict" || cmd === "strict on" || cmd === "strict enable") {
-                globalThis.__pi_forge_strict = true;
-                ctx.ui?.notify?.("pi-forge strict mode ON — future write/edit/bash will be gated (unsupported legacy). Use relaxed by default.\n" + renderStatus(ctx), "info");
-                return;
-            }
-            if (cmd === "relaxed" || cmd === "strict off" || cmd === "strict disable") {
-                try {
-                    delete globalThis.__pi_forge_strict;
-                }
-                catch { }
-                ctx.ui?.notify?.("pi-forge relaxed mode — slash-only, no hard blocks\n" + renderStatus(ctx), "info");
+            if (cmd === "strict" || cmd === "strict on" || cmd === "strict enable" || cmd === "relaxed" || cmd === "strict off" || cmd === "strict disable") {
+                ctx.ui?.notify?.("pi-forge is slash-only (strict mode removed in 1.x) — no hard blocks. Use /forge <task> for discipline.\n" + renderStatus(ctx), "info");
                 return;
             }
             // Treat remaining args as task → drive workflow like Musk-Algorithm
@@ -91,18 +77,6 @@ export default function (pi) {
                 pi.sendUserMessage(instruction, { deliverAs: "steer" });
                 ctx.ui?.notify?.("pi-forge workflow steered into current turn — run intent → plan → intel", "info");
             }
-        },
-    });
-    // Back-compat alias — old users typing /essentials
-    pi.registerCommand("essentials", {
-        description: "Alias for /forge status (pi-forge, formerly pi-essentials)",
-        handler: async (args, ctx) => {
-            if (args.trim().toLowerCase() === "clear") {
-                clearState();
-                ctx.ui?.notify?.("pi-forge state cleared (via /essentials)", "info");
-                return;
-            }
-            ctx.ui?.notify?.(renderStatus(ctx) + "\n(alias: use /forge <task> to start)", "info");
         },
     });
     // Dedicated status command for discoverability

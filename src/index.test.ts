@@ -24,10 +24,6 @@ describe("pi-forge extension (slash-controlled)", () => {
     (globalThis as any).__pi_forge_focus = undefined;
     (globalThis as any).__pi_forge_intel = undefined;
     (globalThis as any).__pi_forge_plan = undefined;
-    (globalThis as any).__pi_forge_strict = undefined;
-    (globalThis as any).__pi_ess_focus = undefined;
-    (globalThis as any).__pi_ess_intel = undefined;
-    (globalThis as any).__pi_ess_plan = undefined;
   });
 
   it("registers 5 tools on startup", () => {
@@ -37,12 +33,11 @@ describe("pi-forge extension (slash-controlled)", () => {
     expect(names).toEqual(["check", "intel", "intent", "memo", "plan"]);
   });
 
-  it("registers slash commands forge, forge-status, essentials", () => {
+  it("registers slash commands forge, forge-status", () => {
     const { pi, commands } = makePi();
     createExtension(pi);
     expect(commands["forge"]).toBeDefined();
     expect(commands["forge-status"]).toBeDefined();
-    expect(commands["essentials"]).toBeDefined();
   });
 
   it("does not register auto-blocking hooks", () => {
@@ -63,11 +58,11 @@ describe("pi-forge extension (slash-controlled)", () => {
     expect(handlers["session_start"]).toBeDefined();
   });
 
-  it("session_start migrates legacy pi-ess keys", async () => {
+  it("session_start hydrates pi-forge keys", async () => {
     const { pi, handlers } = makePi();
     createExtension(pi);
-    await handlers["session_start"]({}, { entries: [{ key: "pi-ess:memo", value: { id: "legacy1", cue: "c", summary: "s", ts: Date.now() } }], store: {} });
-    // after hydrate legacy memo should be available
+    await handlers["session_start"]({}, { entries: [{ key: "pi-forge:memo", value: { id: "legacy1", cue: "c", summary: "s", ts: Date.now() } }], store: {} });
+    // after hydrate memo should be available
     const { memos } = await import("./state.js");
     expect(memos.has("legacy1")).toBe(true);
   });
@@ -99,16 +94,16 @@ describe("pi-forge extension (slash-controlled)", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("cleared"), "info");
   });
 
-  it("forge strict/relaxed toggles mode", async () => {
+  it("forge strict/relaxed deprecated (slash-only)", async () => {
     const { pi, commands } = makePi();
     createExtension(pi);
     const notify = vi.fn();
     const ctx: any = { getContextUsage: () => ({}), ui: { notify } };
     await commands["forge"].handler("strict", ctx);
-    expect((globalThis as any).__pi_forge_strict).toBe(true);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("strict mode ON"), "info");
-    await commands["forge"].handler("relaxed", ctx);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("slash-only"), "info");
     expect((globalThis as any).__pi_forge_strict).toBeUndefined();
+    await commands["forge"].handler("relaxed", ctx);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("slash-only"), "info");
   });
 
   it("forge <task> steers workflow when busy", async () => {
@@ -127,17 +122,6 @@ describe("pi-forge extension (slash-controlled)", () => {
     const ctx: any = { isIdle: () => true, ui: { notify: vi.fn() } };
     await commands["forge"].handler("add auth", ctx);
     expect(sendUserMessage).toHaveBeenCalledWith(expect.stringContaining('Task: "add auth"'));
-  });
-
-  it("essentials alias shows status and supports clear", async () => {
-    const { pi, commands } = makePi();
-    createExtension(pi);
-    const notify = vi.fn();
-    const ctx: any = { getContextUsage: () => ({ percent: 10 }), ui: { notify } };
-    await commands["essentials"].handler("", ctx);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("pi-forge"), "info");
-    await commands["essentials"].handler("clear", ctx);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("cleared"), "info");
   });
 
   it("forge-status alias works", async () => {

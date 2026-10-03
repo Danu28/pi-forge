@@ -1,37 +1,32 @@
 # Changelog
 
-## 1.0.0 — pi-forge inaugural (fork of pi-essentials 1.3.1)
+## 1.0.0 — pi-forge inaugural
 
-### Slash-controlled (breaking vs pi-essentials auto)
+### Slash-controlled discipline
 
 - **New name:** `pi-forge` — slash-controlled discipline, not auto-nag.
-- **Commands:** `/forge <task>` (start), `/forge status`, `/forge clear`, `/forge strict|relaxed`, plus `/forge-status` and `/essentials` compat alias.
-- **No auto hooks:** removed `before_agent_start` prompt injection, `tool_call` hard block, `tool_result` fail-counter gating, `session_before_compact` focus injection, `context` budget injection. Guidance now via `skill` + tool `promptGuidelines` only when you invoke `/forge`.
+- **Commands:** `/forge <task>` (start), `/forge status`, `/forge clear`, plus `/forge-status` alias.
+- **No auto hooks:** guidance via `skill` + tool `promptGuidelines` only when you invoke `/forge`.
 - **Skill:** `skills/forge/SKILL.md` auto-loaded; drives `intent→plan→intel→edits→check→done` only on slash.
 
-### State & migration
+### State
 
-- Durable keys renamed to `pi-forge:*` (`focus`, `deliberation`, `plan`, `memo`, `intel`); `hydrate()` migrates legacy `pi-ess:*` from pi-essentials automatically.
-- Globals renamed to `__pi_forge_*` (mirrors legacy `__pi_ess_*` for compat).
-- Focus prefix now `[pi-forge focus]` (was `[pi-essentials focus]`).
+- Durable keys: `pi-forge:memo`, `pi-forge:deliberation`, `pi-forge:plan`, `pi-forge:focus`, `pi-forge:intel`
+- Globals: `__pi_forge_*` for compaction durability.
+- Focus prefix: `[pi-forge focus]`.
 
-### Tool polish (same 5 contracts)
+### Tool polish (5 contracts)
 
-- `intent`/`plan` descriptions now say “via /forge” (no “REQUIRED before write” hard language).
-- `check` prompt no longer mentions “after 2 fails need debug intent”.
-- `intel` cache key uses `__pi_forge_intel` with fallback to `__pi_ess_intel`.
+- `intent`/`plan` descriptions say “via /forge”.
+- `intel` cache key uses `__pi_forge_intel` with mtime invalidation.
+- `check` OS-aware, 64KB trunc, 600s cap.
 
 ### Product quality
 
-- `package.json` adds `skills` field, `check` alias (`tsc --noEmit`), lighter keywords, repo `Danu28/pi-forge`.
+- `package.json` adds `skills` field, lighter keywords, repo `Danu28/pi-forge`.
 - CI slimmed to single `node 20` job, size gate `200KB`, no `ts-next` matrix.
-- README rewritten for slash usage, migration guide, command table.
-- `pi-essentials` project kept intact alongside (per task Note).
+- README for slash usage, command table.
 
-### Inherited (from 1.3.1)
+### Core
 
 - 5 tools, TF-IDF memo (100 LRU), DAG plan (3-10, depends+refs+check), cached intel, OS-aware check, 64KB trunc, coverage `80/70/70/80`.
-
-## 1.3.1 (pi-essentials baseline)
-
-- See `../pi-essentials/CHANGELOG.md`.

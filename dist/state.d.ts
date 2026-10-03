@@ -56,9 +56,6 @@ declare global {
     var __pi_forge_focus: string | undefined;
     var __pi_forge_intel: IntelProfile | undefined;
     var __pi_forge_plan: Plan | undefined;
-    var __pi_ess_focus: string | undefined;
-    var __pi_ess_intel: IntelProfile | undefined;
-    var __pi_ess_plan: Plan | undefined;
 }
 export declare function tokenize(s: string): string[];
 export declare function scoreEpisode(e: MemoEpisode, q: string, filterTags?: string[]): number;

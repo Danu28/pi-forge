@@ -43,8 +43,6 @@ export function registerTools(pi) {
                 deliberations.shift();
             const fl = `[pi-forge focus] ${p.goal}` + (p.files?.length ? ` files:[${p.files.join(",")}]` : "") + (p.acceptance ? ` acceptance:${p.acceptance}` : "");
             globalThis.__pi_forge_focus = fl;
-            // legacy mirror for migration
-            globalThis.__pi_ess_focus = fl;
             try {
                 await pi.appendEntry?.("pi-forge:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() });
             }
@@ -151,7 +149,6 @@ export function registerTools(pi) {
                 }
                 catch { }
                 globalThis.__pi_forge_plan = pl;
-                globalThis.__pi_ess_plan = pl;
                 const allDone = pl.tasks.every((t) => t.done);
                 const lintWarnsUpd = lintPlan(pl.tasks);
                 const truncWarnUpd = p.goal ? truncationWarnings(p.goal, pl.goal) : null;
@@ -199,7 +196,6 @@ export function registerTools(pi) {
             const pl = { id, goal: truncatedGoal, tasks, ts: Date.now() };
             plans.set(id, pl);
             globalThis.__pi_forge_plan = pl;
-            globalThis.__pi_ess_plan = pl;
             try {
                 await pi.appendEntry?.("pi-forge:plan", pl);
             }
@@ -305,7 +301,7 @@ export function registerTools(pi) {
         async execute(_id, p, _sig, _upd, ctx) {
             const rawCwd = p.projectPath ?? ctx.cwd;
             const cwd = resolve(rawCwd);
-            const cached = (globalThis.__pi_forge_intel ?? globalThis.__pi_ess_intel);
+            const cached = globalThis.__pi_forge_intel;
             if (cached && resolve(cached.cwd) === cwd && !p.refresh) {
                 try {
                     const pkgStat = await stat(join(cwd, "package.json"));
@@ -382,7 +378,6 @@ export function registerTools(pi) {
             const text = `project: ${displayName} (${lang}) | os: ${os} shell:${shell}\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}\n` + `suggested check: ${suggested} — prefer read for file checks; check timeout:10 (file) / 30-60 (test)`;
             const entry = { ...profile, text };
             globalThis.__pi_forge_intel = entry;
-            globalThis.__pi_ess_intel = entry;
             try {
                 await pi.appendEntry?.("pi-forge:intel", entry);
             }

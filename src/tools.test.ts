@@ -99,7 +99,7 @@ describe("registerTools - intent", () => {
     registerTools(pi);
     const intent = tools.get("intent");
     await intent.execute("id", { goal: "my goal", hypotheses: ["a | risk:2", "b | risk:5"], files: ["src/a.ts"], acceptance: "done" }, null, null, { cwd: process.cwd() });
-    expect((globalThis as any).__pi_ess_focus).toContain("my goal");
+    expect((globalThis as any).__pi_forge_focus).toContain("my goal");
   });
 });
 
@@ -306,7 +306,7 @@ describe("registerTools - extra branches", () => {
     registerTools(pi);
     const intel = tools.get("intel");
     // seed cache with old timestamp
-    (globalThis as any).__pi_ess_intel = { cwd: process.cwd(), lang: "node", scripts: {}, testCmd: "old", lintCmd: "old", buildCmd: "old", scannedAt: 0, text: "old text" };
+    (globalThis as any).__pi_forge_intel = { cwd: process.cwd(), lang: "node", scripts: {}, testCmd: "old", lintCmd: "old", buildCmd: "old", scannedAt: 0, text: "old text" };
     const r = await intel.execute("id", {}, null, null, { cwd: process.cwd() });
     expect(r.details.source).toBe("fresh");
     expect(r.content[0].text).not.toContain("old text");
