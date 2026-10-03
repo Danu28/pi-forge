@@ -1,0 +1,446 @@
+import { Type } from "typebox";
+import { memos, deliberations, plans, scoreEpisode, truncate, enforceMemoCap, } from "./state.js";
+import { readFile, stat } from "node:fs/promises";
+import { join, basename, resolve } from "node:path";
+import { parseRisk, validateDepends, parseTask, slugify, runCmd, MAX_TASKS, lintIntent, lintPlan, truncationWarnings, normalizeHypothesis, isWindows, getOSLabel, normalizeCheckForOS, osAwareCheckHint } from "./tool-helpers.js";
+export { validateDepends, parseTask, MAX_TASKS } from "./tool-helpers.js";
+export function registerTools(pi) {
+    pi.registerTool({
+        name: "intent",
+        label: "intent",
+        description: "Deliberate + set working memory in ONE call. Goal + 2 hypotheses + files + acceptance. Picks winner, sets focus that survives compaction. REQUIRED before any write/edit/bash. hypotheses: [\"A mechanism | risk:2\", \"B mechanism | risk:5\"] — risk lower = safer. Also accepts [{value:\"...\"}].",
+        promptSnippet: "intent — deliberate + focus (required before write/edit/bash)",
+        promptGuidelines: ["ALWAYS call intent with 2 hypotheses before plan/write — each as \"mechanism | risk:N\" (e.g. jwt via jose | risk:2)", "Sets focus that survives compaction and links relevant memos"],
+        parameters: Type.Object({
+            goal: Type.String({ minLength: 1 }),
+            hypotheses: Type.Array(Type.Union([Type.String({ minLength: 1 }), Type.Object({ value: Type.String({ minLength: 1 }) }), Type.Object({ text: Type.String({ minLength: 1 }) }), Type.Object({ hypothesis: Type.String({ minLength: 1 }) }), Type.Object({ title: Type.String({ minLength: 1 }) })]), { minItems: 2, maxItems: 2 }),
+            files: Type.Optional(Type.Array(Type.String())),
+            acceptance: Type.Optional(Type.String()),
+            conclusion: Type.Optional(Type.String()),
+        }),
+        async execute(_id, p) {
+            const hyps = p.hypotheses.map(normalizeHypothesis);
+            const id = `think:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+            const risks = hyps.map(parseRisk);
+            let winner = hyps[0].split("|")[0].trim();
+            if (risks[1] < risks[0])
+                winner = hyps[1].split("|")[0].trim();
+            const links = [...memos.values()].filter((e) => scoreEpisode(e, p.goal) > 1).slice(0, 2).map((e) => e.id);
+            const truncatedGoal = truncate(p.goal, 200);
+            const truncatedHyps = hyps.map((h) => truncate(h, 300));
+            const truncatedConclusion = p.conclusion ? truncate(p.conclusion, 300) : `Winner: ${winner}`;
+            const entry = {
+                id,
+                goal: truncatedGoal,
+                hypotheses: truncatedHyps,
+                winner,
+                conclusion: truncatedConclusion,
+                ts: Date.now(),
+                links,
+            };
+            deliberations.push(entry);
+            if (deliberations.length > 20)
+                deliberations.shift();
+            const fl = `[pi-forge focus] ${p.goal}` + (p.files?.length ? ` files:[${p.files.join(",")}]` : "") + (p.acceptance ? ` acceptance:${p.acceptance}` : "");
+            globalThis.__pi_forge_focus = fl;
+            // legacy mirror for migration
+            globalThis.__pi_ess_focus = fl;
+            try {
+                await pi.appendEntry?.("pi-forge:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() });
+            }
+            catch { }
+            try {
+                await pi.appendEntry?.("pi-forge:deliberation", entry);
+            }
+            catch { }
+            const lintWarns = lintIntent({ goal: p.goal, hypotheses: hyps, files: p.files, acceptance: p.acceptance });
+            const truncWarns = [];
+            const gTrunc = truncationWarnings(p.goal, truncatedGoal);
+            if (gTrunc)
+                truncWarns.push(`goal ${gTrunc}`);
+            hyps.forEach((h, i) => {
+                const w = truncationWarnings(h, truncatedHyps[i]);
+                if (w)
+                    truncWarns.push(`hypothesis ${i + 1} ${w}`);
+            });
+            if (p.conclusion) {
+                const w = truncationWarnings(p.conclusion, truncatedConclusion);
+                if (w)
+                    truncWarns.push(`conclusion ${w}`);
+            }
+            const warnBlock = lintWarns.length ? `\n\u26a0\ufe0f input lint:\n- ` + lintWarns.join("\n- ") : "";
+            const truncBlock = truncWarns.length ? `\n\u2702\ufe0f truncated:\n- ` + truncWarns.join("\n- ") : "";
+            return {
+                content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${hyps[0]}\nB: ${hyps[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}` + warnBlock + truncBlock + `\n\u2192 Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) \u2192 intel \u2192 edits \u2192 check` }],
+                details: { deliberation: entry, focusLine: fl, lintWarnings: lintWarns, truncationWarnings: truncWarns },
+            };
+        },
+    });
+    pi.registerTool({
+        name: "plan",
+        label: "plan",
+        description: "Create/update verifiable plan: goal + 3-10 tasks. Each task: title | refs:src/a.ts check:bash: npm test depends:0,1. DAG blocked until earlier done. REQUIRED before any write/edit/bash.",
+        promptSnippet: "plan — DAG 3-10 tasks (required before write)",
+        promptGuidelines: ["NEVER write/edit/bash without intent→plan", "Each task: title | refs:src/a.ts check:cmd depends:0,1"],
+        parameters: Type.Object({
+            goal: Type.Optional(Type.String()),
+            tasks: Type.Optional(Type.Array(Type.String())),
+            id: Type.Optional(Type.String()),
+            done: Type.Optional(Type.Array(Type.Number())),
+        }),
+        async execute(_id, p) {
+            if (p.id && plans.has(p.id)) {
+                const pl = plans.get(p.id);
+                if (p.done?.length) {
+                    // display is 1-indexed ("1. task"), API is 0-indexed — tolerate classic off-by-one
+                    let doneIndices = p.done;
+                    // only auto-correct when caller clearly used 1-indexed (contains tasks.length, no 0)
+                    const hasOutOfRangeOneIndexed = doneIndices.some((n) => n === pl.tasks.length) &&
+                        doneIndices.every((n) => Number.isInteger(n) && n >= 1 && n <= pl.tasks.length);
+                    if (hasOutOfRangeOneIndexed) {
+                        doneIndices = doneIndices.map((n) => n - 1);
+                    }
+                    for (const i of doneIndices) {
+                        if (!Number.isInteger(i) || i < 0 || i >= pl.tasks.length) {
+                            const hint = Number.isInteger(i) && i === pl.tasks.length ? ` — did you mean ${i - 1}? (tasks are 0-indexed; display is 1-indexed)` : "";
+                            return { content: [{ type: "text", text: `Invalid done index ${i} (range 0-${pl.tasks.length - 1})${hint}` }], details: { error: "range" } };
+                        }
+                        const task = pl.tasks[i];
+                        const blocked = task.depends?.some((d) => !pl.tasks[d]?.done);
+                        if (blocked) {
+                            return { content: [{ type: "text", text: `Blocked: Task ${i + 1} depends on [${task.depends.map((d) => d + 1).join(",")}]` }], details: { error: "depends" } };
+                        }
+                        task.done = true;
+                    }
+                }
+                if (p.tasks?.length) {
+                    if (pl.tasks.length >= MAX_TASKS) {
+                        return { content: [{ type: "text", text: `plan cap: already ${MAX_TASKS} tasks (max ${MAX_TASKS})` }], details: { error: "cap" } };
+                    }
+                    const seen = new Set(pl.tasks.map((t) => t.title.toLowerCase()));
+                    const pending = [];
+                    for (const raw of p.tasks) {
+                        const parsed = parseTask(raw);
+                        if (!parsed.title)
+                            continue;
+                        if (seen.has(parsed.title.toLowerCase()))
+                            continue;
+                        pending.push(parsed);
+                        seen.add(parsed.title.toLowerCase());
+                    }
+                    const totalAfter = pl.tasks.length + pending.length;
+                    if (totalAfter > MAX_TASKS) {
+                        return { content: [{ type: "text", text: `plan cap: adding ${pending.length} would exceed ${MAX_TASKS} (have ${pl.tasks.length})` }], details: { error: "cap" } };
+                    }
+                    const finalCount = totalAfter;
+                    for (let idx = 0; idx < pending.length; idx++) {
+                        const selfIdx = pl.tasks.length + idx;
+                        const err = validateDepends(pending[idx].depends, finalCount, selfIdx);
+                        if (err)
+                            return { content: [{ type: "text", text: `Invalid depends for task ${selfIdx + 1}: ${err}` }], details: { error: "depends" } };
+                    }
+                    for (const parsed of pending) {
+                        pl.tasks.push({ ...parsed, done: false });
+                    }
+                }
+                const prevGoal = pl.goal;
+                if (p.goal)
+                    pl.goal = truncate(p.goal, 200);
+                try {
+                    await pi.appendEntry?.("pi-forge:plan", pl);
+                }
+                catch { }
+                globalThis.__pi_forge_plan = pl;
+                globalThis.__pi_ess_plan = pl;
+                const allDone = pl.tasks.every((t) => t.done);
+                const lintWarnsUpd = lintPlan(pl.tasks);
+                const truncWarnUpd = p.goal ? truncationWarnings(p.goal, pl.goal) : null;
+                // only surface lint if still incomplete to avoid noise on done
+                const warnBlockUpd = !allDone && lintWarnsUpd.length ? `\n\u26a0\ufe0f plan lint:\n- ` + lintWarnsUpd.join("\n- ") : "";
+                const truncBlockUpd = truncWarnUpd ? `\n\u2702\ufe0f truncated: goal ${truncWarnUpd} (was ${prevGoal.length}\u2192${pl.goal.length})` : "";
+                return {
+                    content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` + warnBlockUpd + truncBlockUpd + (allDone ? "\n\u2192 All tasks done \u2192 memo remember + commit" : "\n\u2192 Next: intel (once) \u2192 reads/edits \u2192 check \u2192 plan {id:\"" + pl.id + "\", done:[...]}") }],
+                    details: { plan: pl, lintWarnings: lintWarnsUpd, truncationWarning: truncWarnUpd },
+                };
+            }
+            if (!p.goal || !p.tasks?.length) {
+                return { content: [{ type: "text", text: "plan: need goal + tasks[3-10] on create, or id+done to update" }], details: { error: "missing" } };
+            }
+            if (p.tasks.length < 3 || p.tasks.length > MAX_TASKS) {
+                return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} tasks, got ${p.tasks.length}` }], details: { error: "count" } };
+            }
+            const parsedAll = p.tasks.map((raw) => parseTask(raw)).filter((t) => t.title);
+            if (parsedAll.length < 3) {
+                return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} non-empty tasks, got ${parsedAll.length} after filtering` }], details: { error: "count" } };
+            }
+            if (parsedAll.length > MAX_TASKS) {
+                return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} tasks, got ${parsedAll.length} after filtering` }], details: { error: "count" } };
+            }
+            const deduped = [];
+            const seenCreate = new Set();
+            for (const t of parsedAll) {
+                const k = t.title.toLowerCase();
+                if (seenCreate.has(k))
+                    continue;
+                seenCreate.add(k);
+                deduped.push(t);
+            }
+            if (deduped.length < 3) {
+                return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} unique tasks, got ${deduped.length} after dedup` }], details: { error: "count" } };
+            }
+            for (let i = 0; i < deduped.length; i++) {
+                const err = validateDepends(deduped[i].depends, deduped.length, i);
+                if (err)
+                    return { content: [{ type: "text", text: `Invalid depends for task ${i + 1}: ${err}` }], details: { error: "depends" } };
+            }
+            const tasks = deduped.map((parsed) => ({ ...parsed, done: false }));
+            const id = `plan:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+            const truncatedGoal = truncate(p.goal, 200);
+            const pl = { id, goal: truncatedGoal, tasks, ts: Date.now() };
+            plans.set(id, pl);
+            globalThis.__pi_forge_plan = pl;
+            globalThis.__pi_ess_plan = pl;
+            try {
+                await pi.appendEntry?.("pi-forge:plan", pl);
+            }
+            catch { }
+            const lintWarns = lintPlan(tasks);
+            const truncWarn = truncationWarnings(p.goal, truncatedGoal);
+            const warnBlock = lintWarns.length ? `\n\u26a0\ufe0f plan lint:\n- ` + lintWarns.join("\n- ") : "";
+            const truncBlock = truncWarn ? `\n\u2702\ufe0f truncated: goal ${truncWarn}` : "";
+            return {
+                content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})` + warnBlock + truncBlock + `\n\u2192 Next: intel \u2192 reads/edits \u2192 check \u2192 plan {id:"${id}", done:[...]}` }],
+                details: { plan: pl, lintWarnings: lintWarns, truncationWarning: truncWarn },
+            };
+        },
+    });
+    pi.registerTool({
+        name: "memo",
+        label: "memo",
+        description: "Unified durable memory. action=remember to encode or action=recall to retrieve. One tool instead of two. remember needs cue + summary.",
+        promptSnippet: "memo — remember/recall durable memory",
+        promptGuidelines: ["Use memo recall before intent to load relevant context", "Use memo remember after plan done — e.g. memo{action:\"remember\", cue:\"auth-jwt\", summary:\"jwt via jose 15m\"}"],
+        parameters: Type.Object({
+            action: Type.Union([Type.Literal("remember"), Type.Literal("recall")]),
+            cue: Type.Optional(Type.String()),
+            summary: Type.Optional(Type.String()),
+            detail: Type.Optional(Type.String()),
+            query: Type.Optional(Type.String()),
+            tags: Type.Optional(Type.Array(Type.String())),
+            refs: Type.Optional(Type.Array(Type.String())),
+            limit: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
+        }),
+        async execute(_id, p) {
+            if (p.action === "remember") {
+                if (!p.cue?.trim() || !p.summary?.trim()) {
+                    const missing = [];
+                    if (!p.cue?.trim())
+                        missing.push("cue");
+                    if (!p.summary?.trim())
+                        missing.push("summary");
+                    return { content: [{ type: "text", text: `memo remember: missing ${missing.join(" + ")} — need cue + summary. Example: memo{action:"remember", cue:"auth-jwt", summary:"jwt via jose 15m expiry", tags:["auth"], refs:["src/auth.ts"]}` }], details: { error: "missing", missing } };
+                }
+                const norm = p.cue.trim().toLowerCase();
+                const exists = [...memos.values()].find((e) => e.cue.toLowerCase() === norm);
+                if (exists) {
+                    exists.summary = truncate(p.summary, 400);
+                    if (p.detail)
+                        exists.detail = truncate(p.detail, 600);
+                    if (p.tags)
+                        exists.tags = p.tags.slice(0, 8);
+                    if (p.refs)
+                        exists.refs = p.refs.slice(0, 5);
+                    exists.ts = Date.now();
+                    try {
+                        await pi.appendEntry?.("pi-forge:memo", exists);
+                    }
+                    catch { }
+                    return { content: [{ type: "text", text: `Updated ${exists.id} (merged)\n→ Next: intent/plan can now link this memo` }], details: { id: exists.id, episode: exists } };
+                }
+                const id = `${slugify(p.cue)}:${Date.now()}:${Math.random().toString(36).slice(2, 4)}`;
+                const ep = {
+                    id,
+                    cue: truncate(p.cue.trim(), 80),
+                    summary: truncate(p.summary, 400),
+                    detail: p.detail ? truncate(p.detail, 600) : undefined,
+                    tags: p.tags?.slice(0, 8),
+                    refs: p.refs?.slice(0, 5),
+                    ts: Date.now(),
+                };
+                memos.set(id, ep);
+                const evicted = enforceMemoCap();
+                try {
+                    await pi.appendEntry?.("pi-forge:memo", ep);
+                }
+                catch { }
+                return { content: [{ type: "text", text: `Encoded ${id}` + (evicted.length ? ` (evicted ${evicted.length} LRU)` : "") + "\n→ Next: intent will auto-link relevant memos" }], details: { id, episode: ep, evicted } };
+            }
+            else {
+                const q = p.query ?? p.cue ?? "";
+                const lim = Math.min(Math.max(p.limit ?? 5, 1), 20);
+                const tags = p.tags;
+                let cand = [...memos.values()];
+                if (tags?.length) {
+                    cand = cand.filter((e) => tags.every((t) => (e.tags ?? []).map((x) => x.toLowerCase()).includes(t.toLowerCase())));
+                }
+                const scored = cand.map((e) => ({ e, s: scoreEpisode(e, q, tags) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, lim);
+                if (!scored.length) {
+                    return { content: [{ type: "text", text: cand.length ? `No relevant memos for "${q}"` : "No memos yet. Use memo {action:remember} first." }], details: { episodes: [] } };
+                }
+                const text = scored.map(({ e, s }) => `[${e.cue}] (${s.toFixed(1)}) ${e.summary}` + (e.tags?.length ? ` [${e.tags.join(",")}]` : "") + (e.refs?.length ? ` refs:${e.refs.join(",")}` : "")).join("\n") + "\n→ Next: intent will auto-link these memos via scoreEpisode";
+                return { content: [{ type: "text", text }], details: { episodes: scored.map((x) => x.e) } };
+            }
+        },
+    });
+    pi.registerTool({
+        name: "intel",
+        label: "intel",
+        description: "Project profile cached: lang, scripts, test/lint/build, OS + shell. Call ONCE at task start — later calls free (cache). Returns OS-aware suggested check.",
+        promptSnippet: "intel — cached project profile (call once) — returns OS + suggested check",
+        promptGuidelines: ["Call intel once after plan to get test/lint/build cmds + OS-aware check template, then proceed to edits"],
+        parameters: Type.Object({
+            refresh: Type.Optional(Type.Boolean()),
+            projectPath: Type.Optional(Type.String()),
+        }),
+        async execute(_id, p, _sig, _upd, ctx) {
+            const rawCwd = p.projectPath ?? ctx.cwd;
+            const cwd = resolve(rawCwd);
+            const cached = (globalThis.__pi_forge_intel ?? globalThis.__pi_ess_intel);
+            if (cached && resolve(cached.cwd) === cwd && !p.refresh) {
+                try {
+                    const pkgStat = await stat(join(cwd, "package.json"));
+                    if (pkgStat.mtimeMs > cached.scannedAt) {
+                        // stale cache -> fall through to fresh scan
+                    }
+                    else {
+                        return { content: [{ type: "text", text: cached.text + "\n→ Next: reads/edits → check (test: " + cached.testCmd + ")" }], details: { profile: cached, source: "cache" } };
+                    }
+                }
+                catch {
+                    return { content: [{ type: "text", text: cached.text + "\n→ Next: reads/edits → check (test: " + cached.testCmd + ")" }], details: { profile: cached, source: "cache" } };
+                }
+            }
+            const files = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "README.md"];
+            const present = new Set();
+            for (const f of files) {
+                try {
+                    await stat(join(cwd, f));
+                    present.add(f);
+                }
+                catch { }
+            }
+            let lang = "unknown";
+            let scripts = {};
+            let testCmd;
+            let lintCmd;
+            let buildCmd;
+            let name;
+            const os = getOSLabel();
+            const shell = isWindows() ? "cmd.exe" : "bash";
+            const suggested = isWindows() ? 'dir "file.html" or type "file.html" or findstr "pat" "file.html" — or prefer read' : 'ls -lh "file.html" or grep -q "pat" "file.html" — or prefer read';
+            if (present.has("package.json")) {
+                try {
+                    const raw = await readFile(join(cwd, "package.json"), "utf8");
+                    const pkg = JSON.parse(raw);
+                    lang = "node";
+                    name = pkg.name;
+                    scripts = pkg.scripts ?? {};
+                    testCmd = scripts["test"];
+                    lintCmd = scripts["lint"];
+                    buildCmd = scripts["build"];
+                }
+                catch { }
+            }
+            else if (present.has("Cargo.toml")) {
+                lang = "rust";
+                testCmd = "cargo test";
+                buildCmd = "cargo build";
+            }
+            else if (present.has("go.mod")) {
+                lang = "go";
+                testCmd = "go test ./...";
+            }
+            else if (present.has("pyproject.toml")) {
+                lang = "python";
+                testCmd = "pytest";
+            }
+            const profile = {
+                cwd,
+                lang,
+                name,
+                scripts,
+                testCmd: testCmd ?? "not detected",
+                lintCmd: lintCmd ?? "not detected",
+                buildCmd: buildCmd ?? "not detected",
+                os,
+                shell,
+                suggestedCheck: suggested,
+                scannedAt: Date.now(),
+                text: "",
+            };
+            const displayName = name ?? basename(cwd);
+            const text = `project: ${displayName} (${lang}) | os: ${os} shell:${shell}\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}\n` + `suggested check: ${suggested} — prefer read for file checks; check timeout:10 (file) / 30-60 (test)`;
+            const entry = { ...profile, text };
+            globalThis.__pi_forge_intel = entry;
+            globalThis.__pi_ess_intel = entry;
+            try {
+                await pi.appendEntry?.("pi-forge:intel", entry);
+            }
+            catch { }
+            return { content: [{ type: "text", text: text + "\n→ Next: reads/edits → check (test: " + profile.testCmd + ")" }], details: { profile: entry, source: "fresh" } };
+        },
+    });
+    pi.registerTool({
+        name: "check",
+        label: "check",
+        description: "Run a check and get PASS/FAIL + budget in same call. Use testCmd from intel. OS-aware: auto-translates ls/grep/cat ↔ dir/findstr/type on Windows. Never claim success without PASS.",
+        promptSnippet: "check — verify PASS/FAIL + budget (OS-aware)",
+        promptGuidelines: ["Run check after edits; never mark plan done without PASS — use timeout:10 for file, 30-60 for tests", "On FAIL fix and re-check"],
+        parameters: Type.Object({
+            command: Type.String({ minLength: 1 }),
+            cwd: Type.Optional(Type.String()),
+            timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 600 })),
+        }),
+        async execute(_id, p, _sig, _upd, ctx) {
+            let cmd = p.command.trim();
+            if (!cmd)
+                return { content: [{ type: "text", text: "check: command required" }], details: { error: "empty" } };
+            const hint = osAwareCheckHint(cmd);
+            const normalized = normalizeCheckForOS(cmd);
+            if (normalized !== cmd)
+                cmd = normalized;
+            const cwd = p.cwd ?? ctx.cwd;
+            const toMs = Math.min(p.timeout ?? 30, 600) * 1000;
+            const start = Date.now();
+            const res = await runCmd(cmd, cwd, toMs);
+            const elapsed = Math.round((Date.now() - start) / 1000);
+            let pct = null;
+            let tier = "unknown";
+            try {
+                const u = ctx.getContextUsage?.();
+                if (u) {
+                    const v = u.percent ?? (u.tokens && u.contextWindow ? Math.round((u.tokens / u.contextWindow) * 100) : null);
+                    if (typeof v === "number" && Number.isFinite(v)) {
+                        pct = v;
+                        if (pct < 50)
+                            tier = "clear";
+                        else if (pct < 70)
+                            tier = "moderate";
+                        else if (pct < 90)
+                            tier = "getting-full";
+                        else
+                            tier = "CRITICAL";
+                    }
+                }
+            }
+            catch { }
+            const verdict = res.timedOut ? "TIMEOUT" : res.ok ? "PASS" : "FAIL";
+            const body = res.timedOut ? `TIMEOUT after ${elapsed}s` : res.ok ? truncate((res.stdout || res.stderr).trim() || "(no output)", 500) : truncate((res.stderr || res.stdout).split("\n").slice(-40).join("\n"), 1200);
+            const budgetLine = pct !== null ? `budget: ${pct}% (${tier})${tier === "CRITICAL" ? " -> compact next" : ""}` : "budget: unknown";
+            const hintLine = hint ? `\n\u26a0\ufe0f os hint: ${hint} (auto-translated)` : "";
+            const text = `check: ${verdict} (exit ${res.code}) in ${elapsed}s -- ${cmd}\n` + body + `\n${budgetLine}` + hintLine + (res.ok ? "\n→ Next: plan {id,done:[...]} → memo remember" : "\n→ Next: fix error above → re-run check (hint: intel test cmd, after 2 fails → intent{goal:'debug ...'})");
+            return { content: [{ type: "text", text }], details: { ok: res.ok, code: res.code, timedOut: res.timedOut, budget: { pct, tier } } };
+        },
+    });
+}
+//# sourceMappingURL=tools.js.map
