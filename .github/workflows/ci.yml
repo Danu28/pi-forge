@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
       - run: npm run typecheck
@@ -17,6 +17,9 @@ jobs:
       - run: npm run lint
       - run: npm run test:coverage
       - run: npm run size --if-present
+      - name: dist freshness (commit built dist)
+        shell: bash
+        run: git diff --exit-code dist || (echo "STALE DIST: run npm run build and commit dist/" && exit 1)
       - name: size gate (dist <200KB)
         shell: bash
         run: |

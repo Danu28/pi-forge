@@ -25,7 +25,7 @@
     "url": "https://github.com/Danu28/pi-forge.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "build": "tsc",
@@ -34,7 +34,7 @@
     "test:coverage": "vitest run --coverage",
     "test:ci": "npm run typecheck && npm run lint && npm run test:coverage",
     "lint": "eslint src",
-    "size": "npm run build && du -sh dist && ls -lh dist",
+    "size": "npm run build && node -e \"const fs=require('fs');let t=0;for(const f of fs.readdirSync('dist')){try{t+=fs.statSync('dist/'+f).size}catch{}};console.log('dist '+Math.round(t/1024)+'KB');\" && node -e \"const fs=require('fs');console.log(fs.readdirSync('dist').map(f=>f+': '+fs.statSync('dist/'+f).size+'B').join('\\n'))\"",
     "audit": "npm run typecheck && npm run lint && npm run test:coverage && npm run size",
     "prepublishOnly": "npm run build"
   },
